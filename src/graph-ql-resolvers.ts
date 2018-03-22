@@ -1,40 +1,76 @@
 import { parseSnapshotFromFile, Snapshot, Node } from 'v8-heapsnapshot';
 import { HeapNodeUtils, AggregatedSize } from './v8-snapshot-utils';
+import { IResolvers } from 'graphql-tools';
+import _take from 'lodash-es/take';
+import _orderBy from 'lodash-es/orderBy';
+import _filter from 'lodash-es/filter';
+declare type orderByDir = 'desc' | 'asc';
 export interface Resolvers {
-    nodes: () => Node[],
-    types: () => AggregatedSize[],
-    type: (typeName: string) => AggregatedSize,
-    prototypes: () => AggregatedSize[],
-    prototype: (prototypeName: string) => AggregatedSize
+    nodes: (filter: Predicate, first: number, orderBy: OrderBy) => Node[],
+    types: (filter: Predicate, first: number, orderBy: OrderBy) => AggregatedSize[],
+    prototypes: (filter: Predicate, first: number, orderBy: OrderBy) => AggregatedSize[],
 }
-export interface QueryResolvers {
-    query: Resolvers
+
+export interface Predicate {
+    field: string,
+    value: string
 }
-export class Parser {
-    private snapshot: Snapshot;
+
+export interface OrderBy {
+    field: string,
+    direction: orderByDir
+}
+export class GraphQLResolvers {
+    private snapshot: Snapshot = <Snapshot>{};
+    private parsedTypes: AggregatedSize[] = [];
+    private parsedPrototypes: AggregatedSize[] = [];
     constructor() {
     }
 
     public async loadSnapshot(fileName: string): Promise<void> {
-        try
-        {
+        try {
             console.log(`Parsing snapshot from: ${fileName}`);
-            await parseSnapshotFromFile(fileName);
+            this.snapshot = await parseSnapshotFromFile(fileName);
             console.log(`Finished parsing snapshot`);
-        } catch(e) {
+
+            this.parsedTypes = HeapNodeUtils.getTypes(this.snapshot);
+            console.log(`Finished parsing types`);
+
+            this.parsedPrototypes = HeapNodeUtils.getPrototypes(this.snapshot);
+            console.log(`Finished parsing prototypes`);
+
+        } catch (e) {
             console.error(e);
         }
     }
 
-    public resolvers(): QueryResolvers {
+    public resolvers(): IResolvers {
         return {
-            query: {
-                nodes: () => this.snapshot.nodes ,
-                types: () => Array.from<AggregatedSize>(HeapNodeUtils.getTypes(this.snapshot).values()), 
-                type: (typeName: string) => HeapNodeUtils.getRetainedSizeByType(this.snapshot, typeName),
-                prototypes: () => Array.from<AggregatedSize>(HeapNodeUtils.getPrototypes(this.snapshot).values()), 
-                prototype: (prototypeName: string) => HeapNodeUtils.getRetainedSizeByPrototype(this.snapshot, prototypeName)
+            Query: {
+                nodes: (source: any, args: {[argument: string]: any }) => GraphQLResolvers.applyFilters(this.snapshot.nodes, args),
+                types: (source: any, args: {[argument: string]: any }) => GraphQLResolvers.applyFilters(this.parsedTypes, args),
+                prototypes: (source: any, args: {[argument: string]: any }) => GraphQLResolvers.applyFilters(this.parsedPrototypes, args),
             }
         }
+    }
+
+    public static applyFilters<T>(collection: T[], args: {[argument: string]: any }): T[] {
+        let result = collection;
+        console.log(JSON.stringify(args));
+        let filter = args['filter'];
+        if (filter && filter.field) {
+            result = _filter(result, [filter.field, filter.value]);
+        }
+
+        let orderBy = args['orderBy'];
+        if (orderBy && orderBy.field) {
+            result = _orderBy(result, [orderBy.field], [orderBy.direction]);
+        }
+
+        let first = <number>args['first'];
+        if (first) {
+            result = _take(result, first);
+        }
+        return result;
     }
 }

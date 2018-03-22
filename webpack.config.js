@@ -5,11 +5,11 @@ module.exports = {
 	entry: path.resolve(__dirname, 'src/index.ts'),
 	target: 'node',
 	resolve: {
-		mainFields: ['browser', 'main', 'module'],
+		mainFields: ['node', 'main', 'module'],
 		extensions: ['.ts', '.tsx', '.js', '.json']
 	},
 	output: {
-		filename: 'bundle.js',
+		filename: 'server.js',
 		path: path.resolve(__dirname, 'dist')
 	},
 
@@ -21,4 +21,12 @@ module.exports = {
 			}
 		]
 	},
+	externals: [
+		function (context, request, callback) {
+			if (request.indexOf("apollo-engine-binary") > -1) {
+				return callback(null, "commonjs " + request);
+			}
+			callback();
+		},
+	]
 };

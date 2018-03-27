@@ -33,10 +33,10 @@ export class GraphQLResolvers {
             this.snapshot = await parseSnapshotFromFile(fileName);
             console.log(`Finished parsing snapshot`);
 
-            this.parsedTypes = HeapNodeUtils.getTypes(this.snapshot);
+            this.parsedTypes = HeapNodeUtils.getTypes(this.snapshot.nodes);
             console.log(`Finished parsing types`);
 
-            this.parsedPrototypes = HeapNodeUtils.getPrototypes(this.snapshot);
+            this.parsedPrototypes = HeapNodeUtils.getPrototypes(this.snapshot.nodes);
             console.log(`Finished parsing prototypes`);
 
         } catch (e) {
@@ -50,8 +50,21 @@ export class GraphQLResolvers {
                 nodes: (source: any, args: {[argument: string]: any }) => GraphQLResolvers.applyFilters(this.snapshot.nodes, args),
                 types: (source: any, args: {[argument: string]: any }) => GraphQLResolvers.applyFilters(this.parsedTypes, args),
                 prototypes: (source: any, args: {[argument: string]: any }) => GraphQLResolvers.applyFilters(this.parsedPrototypes, args),
+                retained_size: (source: any, args: {[argument: string]: any}) => GraphQLResolvers.retained_size(this.snapshot, source, args)
             }
         }
+    }
+
+    public static retained_size(snapshot: Snapshot, source: any, args: {[argument: string]: any}): Number {
+        if (args['id']) {
+            return HeapNodeUtils.getRetainedSize(snapshot.findNodeById(parseInt(args['id'])));
+        }
+
+        if (source) {
+            return HeapNodeUtils.getRetainedSize(source);
+        }
+
+        return -1;
     }
 
     public static applyFilters<T>(collection: T[], args: {[argument: string]: any }): T[] {

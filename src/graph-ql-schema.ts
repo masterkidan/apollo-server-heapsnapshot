@@ -29,11 +29,18 @@ export const typeDefs = `
         name: ID!
         key: String!
         subNodes: [Node]
-        self_size: Int
-        retained_size: Int
+        shallowSize: Int
         objectCount: Int
     }
-
+    type AggregatedPrototypeSize {
+        name: ID!
+        key: String!
+        subNodes: [Node]
+        shallowSize: Int
+        retainedSize: Int
+        objectCount: Int
+        subTypes: AggregatedSize[]
+    }
     input Predicate {
         field: String,
         value: String
@@ -47,6 +54,7 @@ export const typeDefs = `
     type Query {
         nodes(filter: Predicate, first: Int, orderBy: OrderBy): [Node]
         types(filter: Predicate, first: Int, orderBy: OrderBy): [AggregatedSize]   
-        prototypes(filter: Predicate, first: Int, orderBy: OrderBy): [AggregatedSize]
+        prototypes(filter: Predicate, first: Int, orderBy: OrderBy): [AggregatedPrototypeSize]
+        retained_size(id: String!): Int
     }
 `;

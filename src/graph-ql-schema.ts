@@ -1,16 +1,7 @@
 // The GraphQL schema in string form
 export const typeDefs = `
-    enum EdgeType {
-        context
-        element
-        property
-        internal
-        hidden
-        shortcut
-        weak
-    }
     type Edge {
-        type: EdgeType
+        type: String
         name: String!
         from: Node
         to: Node
@@ -27,19 +18,16 @@ export const typeDefs = `
     }
     type AggregatedSize {
         name: ID!
-        key: String!
-        subNodes: [Node]
         shallowSize: Int
         objectCount: Int
     }
     type AggregatedPrototypeSize {
         name: ID!
-        key: String!
-        subNodes: [Node]
+        type: String
         shallowSize: Int
         retainedSize: Int
         objectCount: Int
-        subTypes: AggregatedSize[]
+        subTypes: [AggregatedSize]
     }
     input Predicate {
         field: String,
@@ -52,9 +40,7 @@ export const typeDefs = `
     }
 
     type Query {
-        nodes(filter: Predicate, first: Int, orderBy: OrderBy): [Node]
         types(filter: Predicate, first: Int, orderBy: OrderBy): [AggregatedSize]   
         prototypes(filter: Predicate, first: Int, orderBy: OrderBy): [AggregatedPrototypeSize]
-        retained_size(id: String!): Int
     }
 `;

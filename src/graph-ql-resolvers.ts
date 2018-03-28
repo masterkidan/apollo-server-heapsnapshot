@@ -21,7 +21,6 @@ export interface OrderBy {
     direction: orderByDir
 }
 export class GraphQLResolvers {
-    private snapshot: Snapshot = <Snapshot>{};
     private parsedTypes: AggregatedSize[] = [];
     private parsedPrototypes: AggregatedSize[] = [];
     constructor() {
@@ -30,13 +29,14 @@ export class GraphQLResolvers {
     public async loadSnapshot(fileName: string): Promise<void> {
         try {
             console.log(`Parsing snapshot from: ${fileName}`);
-            this.snapshot = await parseSnapshotFromFile(fileName);
+            let snapshot = await parseSnapshotFromFile(fileName);
             console.log(`Finished parsing snapshot`);
 
-            this.parsedTypes = HeapNodeUtils.getTypes(this.snapshot.nodes);
+            this.parsedTypes = HeapNodeUtils.getTypes(snapshot.nodes);
             console.log(`Finished parsing types`);
 
-            this.parsedPrototypes = HeapNodeUtils.getPrototypes(this.snapshot.nodes);
+            this.parsedPrototypes = HeapNodeUtils.getPrototypes(snapshot.nodes);
+            snapshot = undefined;
             console.log(`Finished parsing prototypes`);
 
         } catch (e) {
@@ -47,24 +47,10 @@ export class GraphQLResolvers {
     public resolvers(): IResolvers {
         return {
             Query: {
-                nodes: (source: any, args: {[argument: string]: any }) => GraphQLResolvers.applyFilters(this.snapshot.nodes, args),
                 types: (source: any, args: {[argument: string]: any }) => GraphQLResolvers.applyFilters(this.parsedTypes, args),
                 prototypes: (source: any, args: {[argument: string]: any }) => GraphQLResolvers.applyFilters(this.parsedPrototypes, args),
-                retained_size: (source: any, args: {[argument: string]: any}) => GraphQLResolvers.retained_size(this.snapshot, source, args)
             }
         }
-    }
-
-    public static retained_size(snapshot: Snapshot, source: any, args: {[argument: string]: any}): Number {
-        if (args['id']) {
-            return HeapNodeUtils.getRetainedSize(snapshot.findNodeById(parseInt(args['id'])));
-        }
-
-        if (source) {
-            return HeapNodeUtils.getRetainedSize(source);
-        }
-
-        return -1;
     }
 
     public static applyFilters<T>(collection: T[], args: {[argument: string]: any }): T[] {

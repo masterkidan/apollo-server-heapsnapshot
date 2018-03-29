@@ -32,10 +32,13 @@ export class GraphQLResolvers {
             let snapshot = await parseSnapshotFromFile(fileName);
             console.log(`Finished parsing snapshot`);
 
-            this.parsedTypes = HeapNodeUtils.getTypes(snapshot.nodes);
+            let nodes = HeapNodeUtils.processNodes(snapshot.nodes);
+            console.log(`Finished processing snapshot`);
+
+            this.parsedTypes = HeapNodeUtils.getTypes(nodes);
             console.log(`Finished parsing types`);
 
-            this.parsedPrototypes = HeapNodeUtils.getPrototypes(snapshot.nodes);
+            this.parsedPrototypes = HeapNodeUtils.getPrototypes(nodes);
             snapshot = undefined;
             console.log(`Finished parsing prototypes`);
 

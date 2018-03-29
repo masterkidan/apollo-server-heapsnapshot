@@ -3,6 +3,9 @@ import reduce from 'lodash-es/reduce';
 import filter from 'lodash-es/filter';
 import flatten from 'lodash-es/flatten';
 import map from 'lodash-es/map';
+import * as process from 'process';
+import * as readline from 'readline';
+import { print } from 'util';
 
 export interface AggregatedSize {
     name: string,
@@ -16,21 +19,57 @@ export interface AggregatedPrototypeSize extends AggregatedSize {
     retainedSize: number;
 }
 
+export interface HeapNode extends Node {
+    retained_size: number;
+    subTypes: Map<string, AggregatedSize>
+}
+
+function printProgress(current: number, total: number): void {
+    readline.cursorTo(process.stdout, 0);
+    process.stdout.write(`processing ${current} of ${total}`);
+}
+
 export class HeapNodeUtils {
+    public static processNodes(nodes: Node[]): HeapNode[] {
+        let retainedSizeMap = new Map<number, Map<string, AggregatedSize>>();
+        let total = nodes.length;
+        let i = 0;
+        return nodes.map(node => {
+            let heapNode = <HeapNode>node;
+            if (heapNode.retained_size) {
+                return heapNode;
+            }
+
+            if (retainedSizeMap.has(heapNode.id)) {
+                let retainedSizeByType = retainedSizeMap.get(heapNode.id);
+                heapNode.subTypes = retainedSizeByType;
+                heapNode.retained_size = HeapNodeUtils.getRetainedSizeFromSubTypes(heapNode.subTypes);
+                return heapNode;
+            }
+
+            heapNode.subTypes = HeapNodeUtils.getSizeByType(node, retainedSizeMap);
+            heapNode.retained_size = this.getRetainedSizeFromSubTypes(heapNode.subTypes);
+            i = i + 1;
+            printProgress(i, total);
+            return heapNode;
+        });
+    }
+
+    private static getRetainedSizeFromSubTypes(subTypes: Map<string, AggregatedSize>) {
+        let sum = 0;
+        for (let [key, value] of subTypes) {
+            sum += value.shallowSize;
+        }
+
+        return sum;
+    }
+
     public static getRetainedSize(node: Node): number {
         let sum = 0;
         HeapNodeUtils.visitRetainerTree(node, (n) => sum += n.self_size);
         return sum;
     }
 
-    public static getRetainedSizeByPrototype(snapshot: Snapshot, prototypeName: string): AggregatedSize {
-        let matchingNodes = filter(snapshot.nodes, (node) => node.name === prototypeName);
-        return {
-            name: prototypeName,
-            shallowSize: reduce(matchingNodes, (sum, node) => sum + node.self_size, 0),
-            objectCount: matchingNodes.length,
-        }
-    }
     public static visitRetainerTree(node: Node, reducer: (node: Node) => void): void {
         let queue = [node];
         let currNode = queue.pop();
@@ -49,14 +88,67 @@ export class HeapNodeUtils {
             currNode = queue.pop();
         }
     }
-    public static getSizeByType(node: Node): AggregatedSize[] {
-        let matchingNodes = [];
-        HeapNodeUtils.visitRetainerTree(node, (n) => matchingNodes.push(n));
-        return HeapNodeUtils.getTypes(matchingNodes);
+    private static getSizeByType(node: Node, precalculatedTypeMap: Map<number, Map<string, AggregatedSize>>): Map<string, AggregatedSize> {
+        if (precalculatedTypeMap.has(node.id)) {
+            return precalculatedTypeMap.get(node.id);
+        }
+
+        let queue = <Array<HeapNode>>[node];
+        let currNode = <HeapNode>queue.pop();
+        while (currNode) {
+            if (currNode.in_edges.length == 0) {
+                let totalTypeSize = new Map<string, AggregatedSize>();
+                let size = {
+                    objectCount: 1,
+                    name: currNode.type,
+                    shallowSize: currNode.self_size
+                };
+                totalTypeSize.set(currNode.type, size);
+                precalculatedTypeMap.set(currNode.id, totalTypeSize);
+                currNode = queue.pop();
+            } else {
+                let edges = currNode.in_edges;
+                let totalTypeSize = new Map<string, AggregatedSize>();
+                let canCalculateSize = true;
+                for (let i in edges) {
+                    let n = edges[i].from;
+                    if (precalculatedTypeMap.has(n.id)) {
+                        totalTypeSize = HeapNodeUtils.mergeSubTypes(totalTypeSize, precalculatedTypeMap.get(n.id));
+                    } else {
+                        let index = queue.findIndex((item) => item.id == n.id)
+                        if (index == -1) {
+                            canCalculateSize = false;
+                            queue.push(<HeapNode>n);
+                        } else {
+                            // let offender = {
+                            //     name: queue[index].name,
+                            //     id: queue[index].id, 
+                            //     type: queue[index].type,
+                            //     self_size: queue[index].self_size
+                            // };
+                            // console.log(`Item in queue: ${JSON.stringify(offender)}`);
+                            // let victim = {
+                            //     name: n.name, 
+                            //     id: n.id, 
+                            //     type: n.type, 
+                            //     self_size: n.self_size
+                            // };
+                            // console.log(`Item in edge: ${JSON.stringify(victim)}`);
+                        }
+                    }
+                }
+
+                if (canCalculateSize) {
+                    precalculatedTypeMap.set(currNode.id, totalTypeSize);
+                    currNode = queue.pop();
+                }
+            }
+        }
+        return precalculatedTypeMap.get(node.id);
     }
 
-    public static getTypes(nodes: Node[]): AggregatedSize[] {
-        return Array.from(reduce(nodes, (sumMap: Map<string, AggregatedSize>, curr: Node) => {
+    private static getTypeMap(nodes: Node[]): Map<string, AggregatedSize> {
+        return reduce(nodes, (sumMap: Map<string, AggregatedSize>, curr: Node) => {
             let currentState: AggregatedSize;
             if (!sumMap.has(curr.type)) {
                 currentState = { name: curr.type, objectCount: 0, shallowSize: 0 };
@@ -67,12 +159,16 @@ export class HeapNodeUtils {
             currentState.shallowSize = currentState.shallowSize + curr.self_size;
             sumMap.set(curr.type, currentState);
             return sumMap;
-        }, new Map<string, AggregatedSize>()).values());
+        }, new Map<string, AggregatedSize>());
     }
 
-    public static getPrototypes(nodes: Node[]): AggregatedPrototypeSize[] {
-        let prototypeNodeMap = new Map<string, AggregatedSize[]>();
-        let prototypeMap = reduce(nodes, (sumMap: Map<string, AggregatedPrototypeSize>, curr: Node) => {
+    public static getTypes(nodes: Node[]): AggregatedSize[] {
+        return Array.from(HeapNodeUtils.getTypeMap(nodes).values());
+    }
+
+    public static getPrototypes(nodes: HeapNode[]): AggregatedPrototypeSize[] {
+        let subTypeMap = new Map<string, Map<string, AggregatedSize>>();
+        let prototypeMap = reduce(nodes, (sumMap: Map<string, AggregatedPrototypeSize>, curr: HeapNode) => {
             let prototypeName = curr.name;
             // See below doc for why this is done https://v8docs.nodesource.com/node-9.3/d8/da4/classv8_1_1_heap_graph_node.html#a452252d3974a97cbe0493e80d2522195
             // in the case of strings/ regexs prototypeName == value of object  
@@ -88,36 +184,50 @@ export class HeapNodeUtils {
                     objectCount: 0,
                     shallowSize: 0,
                     retainedSize: 0,
-                    subTypes: []
+                    subTypes: undefined
                 };
-                prototypeNodeMap.set(prototypeName, []);
+                subTypeMap.set(prototypeName, new Map<string, AggregatedSize>())
             } else {
                 currentState = sumMap.get(prototypeName);
             }
 
             currentState.objectCount++;
-            let typeMap = HeapNodeUtils.getSizeByType(curr);
-            
             currentState.shallowSize = currentState.shallowSize + curr.self_size;
+            currentState.retainedSize = currentState.retainedSize + curr.retained_size;
+            subTypeMap.set(prototypeName, HeapNodeUtils.mergeSubTypes(subTypeMap.get(prototypeName), curr.subTypes));
             sumMap.set(prototypeName, currentState);
             return sumMap;
         }, new Map<string, AggregatedPrototypeSize>());
-        
-        // for (let [key, value] of prototypeNodeMap) {
-        //     let storedEntry = prototypeMap.get(key);
-        //     let retainedSize = 0;
-        //     storedEntry.subTypes = Array.from(reduce(value, (s, v) => {
-        //         let currVal = s.get(v.name);
-        //         currVal.shallowSize = currVal.shallowSize + v.shallowSize;
-        //         currVal.objectCount = currVal.objectCount + v.objectCount;
-        //         retainedSize = retainedSize + v.shallowSize;
-        //         s.set(v.name, currVal);
-        //         return s;
-        //     }, new Map<string, AggregatedSize>()).values());
-        //     storedEntry.retainedSize = retainedSize;
-        //     prototypeMap.set(key, storedEntry);
-        // }
+
+        for (let [key, value] of prototypeMap) {
+            value.subTypes = Array.from(subTypeMap.get(key).values());
+            prototypeMap.set(key, value);
+        }
 
         return Array.from(prototypeMap.values());
+    }
+
+    private static mergeSubTypes(type1: Map<string, AggregatedSize>, type2: Map<string, AggregatedSize>): Map<string, AggregatedSize> {
+        if (!type1 || type1.size == 0) {
+            return type2;
+        }
+
+        if (!type2 || type2.size == 0) {
+            return type1;
+        }
+
+        let parentMap = (type1.size > type2.size) ? type1 : type2;
+        let childMap = (type1.size > type2.size) ? type2 : type1;
+        for (let [key, value] of childMap) {
+            let shallowSize = value.shallowSize + (parentMap.has(key) ? parentMap.get(key).shallowSize : 0);
+            let objectCount = value.objectCount + (parentMap.has(key) ? parentMap.get(key).objectCount : 0);
+            parentMap.set(key, {
+                name: value.name,
+                objectCount: objectCount,
+                shallowSize: shallowSize
+            });
+        }
+
+        return parentMap;
     }
 }

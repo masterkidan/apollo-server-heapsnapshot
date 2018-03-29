@@ -18,7 +18,7 @@ export class Server {
     constructor() {
         this.app = express();
         this.parser = new GraphQLResolvers();
-        this.parser.loadSnapshot("C:\\\\Users\\\\mukav\\\\Downloads\\\\Heap-20180321T181425.heapsnapshot");
+        this.parser.loadSnapshot("C:\\\\Users\\\\mukav\\\\Downloads\\\\Heap-Test-StringConcat.heapsnapshot");
         let resolvers = this.parser.resolvers();
         // Put together a schema
         const schema = makeExecutableSchema({
